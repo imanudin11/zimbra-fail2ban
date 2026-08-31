@@ -1,0 +1,85 @@
+#!/bin/bash
+# f2b-why <ip> -- is this IP banned, by which jail, and why?
+#
+# Runs unprivileged, but 'ipset test' needs CAP_NET_ADMIN and the Fail2Ban
+# database is mode 0600 root. Without those the ban state CANNOT be
+# determined, so it is reported as UNKNOWN rather than "not banned" --
+# reporting a banned customer as unbanned is the worst possible answer on
+# a support call.
+IP="$1"
+[ -z "$IP" ] && { echo "Usage: f2b-why <ip>"; exit 1; }
+ 
+# The argument is interpolated into a SQL string below; accept only a bare
+# IPv4/IPv6 address with an optional prefix length.
+if ! [[ "$IP" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}(/[0-9]{1,2})?$ ]] \
+&& ! [[ "$IP" =~ ^[0-9A-Fa-f:]+(/[0-9]{1,3})?$ ]]; then
+    echo "Not a valid IP address: $IP" >&2
+    exit 1
+fi
+ 
+IS_ROOT=0; [ "$(id -u)" -eq 0 ] && IS_ROOT=1
+ 
+echo "=== $IP ==="
+[ "$IS_ROOT" -eq 0 ] && echo "(Not running as root - ban state and history unavailable.)"
+echo
+ 
+# --- Current ban state, per jail ---
+FOUND=0
+if [ "$IS_ROOT" -eq 1 ]; then
+    for S in $(ipset list -n 2>/dev/null | grep '^f2b-'); do
+      if ipset test "$S" "$IP" >/dev/null 2>&1; then
+        JAIL="${S#f2b-}"
+        LEFT=$(ipset list "$S" | awk -v ip="$IP" '$1==ip {for(i=1;i<=NF;i++) if($i=="timeout") print ($(i+1)=="0" ? "PERMANENT" : $(i+1)"s left")}')
+        echo "Banned by $JAIL  ${LEFT:-no timeout}"
+        FOUND=1
+      fi
+    done
+    [ "$FOUND" -eq 0 ] && echo "Not currently banned"
+else
+    echo "Ban state: UNKNOWN (re-run as root to determine)"
+fi
+echo
+ 
+# --- Recent log activity (trailing referer/UA/upstream fields trimmed) ---
+echo "--- Why (recent matches) ---"
+MATCHED=0
+for L in /var/log/zimbra.log /opt/zimbra/log/nginx.log /opt/zimbra/log/nginx.access.log; do
+  if [ ! -r "$L" ]; then
+    [ -e "$L" ] && echo "[$L: not readable by $(id -un)]"
+    continue
+  fi
+  N=$(grep -ac "$IP" "$L" 2>/dev/null)
+  if [ "$N" -gt 0 ]; then
+    MATCHED=1
+    echo "[$L: $N lines]"
+    grep -a "$IP" "$L" | tail -3 \
+      | sed -E 's/ upstream:.*$//' \
+      | sed -E 's/ "https?:\/\/[^"]*" "Mozilla.*$//; s/ "-" "[^"]*" "[^"]*" "[^"]*"$//'
+    echo
+  fi
+done
+[ "$MATCHED" -eq 0 ] && { echo "No activity in today's logs."; echo; }
+ 
+# --- Which accounts are failing (includes rotated logs) ---
+echo "--- Accounts failing from this IP ---"
+ACCTS=$(zgrep -ah "$IP" /opt/zimbra/log/nginx.log /opt/zimbra/log/nginx.log-* 2>/dev/null \
+  | grep -aE 'NO AUTHENTICATE failed|user not found' \
+  | grep -ao 'login: "[^"]*"' | sort | uniq -c | sort -rn)
+if [ -n "$ACCTS" ]; then printf '%s\n' "$ACCTS"; else echo "None."; fi
+echo
+ 
+# --- Ban history from the database (survives log rotation) ---
+echo "--- Ban history ---"
+if [ "$IS_ROOT" -eq 1 ]; then
+    HIST=$(sqlite3 /var/lib/fail2ban/fail2ban.sqlite3 \
+      "select jail, datetime(timeofban,'unixepoch'), bantime from bans where ip='$IP' order by timeofban desc limit 5;" 2>/dev/null)
+    if [ -n "$HIST" ]; then printf '%s\n' "$HIST"; else echo "None on record."; fi
+else
+    echo "UNKNOWN (re-run as root to determine)"
+fi
+ 
+# --- Only offer the release command if there is something to release ---
+if [ "$FOUND" -eq 1 ]; then
+  echo
+  echo "To release:  fail2ban-client unban $IP"
+fi
