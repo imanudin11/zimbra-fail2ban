@@ -1,0 +1,69 @@
+[DEFAULT]
+findtime    = 86400
+logencoding = utf-8
+bantime     = 100h
+bantime.increment = true
+bantime.multipliers = 1 4 24 168 2160
+action = route
+ 
+# --- MTA hosts ------------------------------------------------------------
+[zimbra-smtp]
+enabled  = true
+filter   = zimbra-smtp
+port     = 25,465,587
+logpath  = /var/log/zimbra.log
+maxretry = 3
+ 
+# Non-SMTP commands on the submission ports: nothing legitimate does this.
+# Ban on sight.
+[zimbra-nonsmtp]
+enabled  = true
+filter   = zimbra-nonsmtp
+port     = 465,587
+logpath  = /var/log/zimbra.log
+maxretry = 1
+ 
+# Command-injection probes are unambiguously hostile: ban on sight, 6 months,
+# no escalation ladder needed at that duration.
+[zimbra-cmdinject]
+enabled  = true
+filter   = zimbra-cmdinject
+port     = 25,465,587
+logpath  = /var/log/zimbra.log
+maxretry = 1
+bantime  = 180d
+bantime.increment = false
+ 
+# --- Proxy hosts ----------------------------------------------------------
+[zimbra-nginx]
+enabled  = true
+filter   = zimbra-nginx
+port     = 80,443
+logpath  = /opt/zimbra/log/nginx.log
+maxretry = 1
+ 
+# Wrong password on an account that EXISTS. maxretry is deliberately looser
+# than the other jails: a customer device with a stale saved password lands
+# here, and the ban action is all-ports.
+[zimbra-nginx-authfail]
+enabled  = true
+filter   = zimbra-nginx-authfail
+port     = 143,993,110,995
+logpath  = /opt/zimbra/log/nginx.log
+maxretry = 3
+ 
+# Login attempts for accounts that do NOT exist: enumeration, or a device
+# still configured for a departed user.
+[zimbra-imap-auth]
+enabled  = true
+filter   = zimbra-imap-auth
+port     = 143,993,110,995
+logpath  = /opt/zimbra/log/nginx.log
+maxretry = 2
+ 
+[zimbra-uri]
+enabled  = true
+filter   = zimbra-uri
+port     = 80,443
+logpath  = /opt/zimbra/log/nginx.access.log
+maxretry = 1
