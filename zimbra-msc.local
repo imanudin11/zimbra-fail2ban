@@ -4,7 +4,7 @@ logencoding = utf-8
 bantime     = 100h
 bantime.increment = true
 bantime.multipliers = 1 4 24 168 2160
-action = route
+action = iptables-ipset-proto6-allports
  
 # --- MTA hosts ------------------------------------------------------------
 [zimbra-smtp]
@@ -55,11 +55,11 @@ maxretry = 3
 # Login attempts for accounts that do NOT exist: enumeration, or a device
 # still configured for a departed user.
 [zimbra-imap-auth]
-enabled  = true
+enabled  = false
 filter   = zimbra-imap-auth
 port     = 143,993,110,995
 logpath  = /opt/zimbra/log/nginx.log
-maxretry = 2
+maxretry = 3
  
 [zimbra-uri]
 enabled  = true
