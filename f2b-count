@@ -1,0 +1,4 @@
+#!/bin/bash
+for s in $(ipset list -n 2>/dev/null | grep '^f2b-'); do
+  printf '%s %s\n' "${s#f2b-}" "$(ipset list "$s" | grep -c '^[0-9]')"
+done | awk '{printf "%-30s %6d\n", $1, $2; t+=$2} END {printf "%-30s %6d\n", "TOTAL", t}'
